@@ -1,0 +1,100 @@
+---
+title: "prudential-life-insurance-assessment"
+author: "Shiv"
+date: "Wednesday, Dec 29, 2015"
+output: html_document
+pandoc_args: ["+RTS", "-K64m","-RTS"]
+---
+InsuBot, **Insurnace** **Bot**, magically associates a "response" with a given customer profile. The Response indicates a customers need for insurnance on a scale of 1 to 8. InsuBot helps companies access target set of customers for insurance policies.
+
+## Data Loading and segregation as "training" and "test" data
+
+```{r }
+WKDir="C:/Users/shivsood/Documents/GitHub/AnalyzeThis/LifeInsuranceAssessment/data"
+setwd(WKDir)
+df<-read.csv("train.csv",header=TRUE)
+validationSet<-read.csv("test.csv",header=TRUE)
+
+#Sampler Test.
+df<-df[1:1000,]
+dataShuffler<-function(df,predictionVar,p,list) {
+    library(caret)
+    #Generated a random seed between 0 and 29122015
+    #mySeed=as.character(as.integer(runif(1,0,29122015)))
+    mySeed="12292015"
+    set.seed(mySeed)
+    index=createDataPartition(df$Response,p=0.4,list=FALSE)
+    return(index)    
+}
+
+removeSparsePredictors<-function(df,sparseTolerance){
+  #Remove columns that are complete NAs.
+  dfSparseness = sapply(df,function(z) round(100*sum(is.na(z))/nrow(df),2))
+  
+  dfSparseness[dfSparseness!=sparseTolerance]
+  colsToDrop=dfSparseness[dfSparseness!=sparseTolerance]
+  #ncol(df)
+  #df=df[,-which(names(df) %in% names(colsToDrop))]
+  #ncol(df)
+  
+  return(colsToDrop)
+  }
+
+removeZeroVariancePredictors<-function(df){
+  varOfCols=sapply(df,function(z) round(var(z),2))
+  varOfCols[varOfCols==0]
+  varOfCols[is.na(varOfCols)]
+
+  #Remove columns that have a variance of 0
+  colsToDrop=varOfCols[varOfCols==0]
+  #df=df[,-which(names(df) %in% names(colsToDrop))]
+  
+  return(colsToDrop)
+}
+
+## Model Creation. Create multiple models. Avoid overfitting by resampling training data for each model.
+
+for(count in 1:1) {
+  #Create Training and Test sets.
+  trainIndex = dataShuffler(df,df$Response,p=0.4,list=FALSE)
+  trainingSet=df[trainIndex,]
+  testSet=df[-trainIndex,]
+  
+  nrow(trainingSet)
+  nrow(testSet)
+  
+  #Remove factor variables from the Training and Test sets
+  dummies=dummyVars(Response~.,data=trainingSet, levelsOnly=FALSE)
+  trainingSetNoFactors=as.data.frame(predict(dummies,newdata=trainingSet))
+  trainingSetNoFactors$Response<-trainingSet$Response
+
+  #Remove Factors in TestDataSet
+  dummies=dummyVars(Response~.,data=testSet, levelsOnly=FALSE)
+  testSetNoFactors=as.data.frame(predict(dummies,newdata=testSet))
+  testSetNoFactors$Response<-testSet$Response
+
+  #Data Cleaning.
+  colsToDropSparse=removeSparsePredictors(trainingSetNoFactors,0)
+  trainingSetNoFactors=trainingSetNoFactors[,-which(names(trainingSetNoFactors) %in% names(colsToDropSparse))]
+  testSetNoFactors=testSetNoFactors[,-which(names(testSetNoFactors) %in% names(colsToDropSparse))]
+  colsToDropVar=removeZeroVariancePredictors(trainingSetNoFactors)
+  trainingSetNoFactors=trainingSetNoFactors[,-which(names(trainingSetNoFactors) %in% names(colsToDropVar))]
+  testSetNoFactors=testSetNoFactors[,-which(names(testSetNoFactors) %in% names(colsToDropVar))]
+  
+    
+  library(caret)
+  trainingSetNoFactors$Response=as.factor(trainingSetNoFactors$Response)
+  preProc=preProcess(trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))],method="pca", thresh=0.1)
+  trainPC=predict(preProc,trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))])
+  modelFitRPartsPCA<-train(trainingSetNoFactors$Response~.,method="rf",data=trainPC)
+
+  #print(modelFitRPartsPCA$finalModel)
+
+  testSetNoFactors$Response=as.factor(testSetNoFactors$Response)
+  testPC=predict(preProc,testSetNoFactors[,-c(ncol(testSetNoFactors))]) #Apply the same preprocessing to testset.
+  cf<-confusionMatrix(testSetNoFactors$Response, predict(modelFitRPartsPCA, testPC))
+  cf
+}
+
+```
+
