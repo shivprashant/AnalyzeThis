@@ -1,8 +1,8 @@
-WKDir="C:/Users/shivsood/Documents/GitHub/AnalyzeThis/LifeInsuranceAssessment/data"
+WKDir="C:/Users/shivsood/Documents/GitHub/AnalyzeThis/LifeInsuranceAssessment"
 setwd(WKDir)
 
-df<-read.csv("train.csv",header=TRUE)
-validationSet<-read.csv("test.csv",header=TRUE)
+df<-read.csv("data/train.csv",header=TRUE)
+validationSet<-read.csv("data/test.csv",header=TRUE)
 
 #Sampler Test. Comment this line to get the realstuff.
 df<-df[1:1000,]
@@ -38,9 +38,56 @@ removeZeroVariancePredictors<-function(df){
   return(colsToDrop)
 }
 
+createModels<-function(trainSetNoFactors,predictionVar){
+  library(caret)
+  trainingSetNoFactors$Response=as.factor(trainingSetNoFactors$Response)
+  preProc=preProcess(trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))],method="pca", thresh=0.8)
+  trainPC=predict(preProc,trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))])
+  
+  #Create a Randomforest based model
+  if(file.exists("models/LICRFPCA.rds")) {
+    modelFitRPartsPCA<-readRDS("models/LICRFPCA.rds")
+  } else{
+    modelFitRPartsPCA<-train(trainingSetNoFactors$Response~.,method="rf",data=trainPC)
+    saveRDS(modelFitRPartsPCA,"models/LICRFPCA.rds")
+  }
+  
+  #Create a RParts based model
+  if(file.exists("models/LICRPartsPCA.rds")) {
+    modelFitRPartsPCA<-readRDS("models/LICRPartsPCA.rds")
+  } else{
+    modelFitRPartsPCA<-train(trainingSetNoFactors$Response~.,method="rpart",data=trainPC)
+    saveRDS(modelFitRPartsPCA,"models/LICRPartsPCA.rds")
+  }
+  return(preProc)
+}
+
+
+compareModels<-function(testSetNoFactors,predictionVar,preProc){
+  
+  if(file.exists("models/LICRPartsPCA.rds")) {
+    modelFitRPartsPCA<-readRDS("models/LICRPartsPCA.rds")
+    
+    testSetNoFactors$Response=as.factor(testSetNoFactors$Response)
+    testPC=predict(preProc,testSetNoFactors[,-c(ncol(testSetNoFactors))]) #Apply the same preprocessing to testset.
+    cf<-confusionMatrix(testSetNoFactors$Response, predict(modelFitRPartsPCA, testPC))
+    print(cf)      
+  } 
+  
+  if(file.exists("models/LICRFPCA.rds")) {
+    modelFitRFPCA<-readRDS("models/LICRFPCA.rds")
+    
+    testSetNoFactors$Response=as.factor(testSetNoFactors$Response)
+    testPC=predict(preProc,testSetNoFactors[,-c(ncol(testSetNoFactors))]) #Apply the same preprocessing to testset.
+    cf<-confusionMatrix(testSetNoFactors$Response, predict(modelFitRFPCA, testPC))
+    print(cf)      
+  }
+  
+}
+
 ## Model Creation. Create multiple models. Avoid overfitting by resampling training data for each model.
 
-for(count in 1:5) {
+for(count in 1:1) {
   #Create Training and Test sets.
   trainIndex = dataShuffler(df,df$Response,p=0.4,list=FALSE)
   trainingSet=df[trainIndex,]
@@ -68,16 +115,11 @@ for(count in 1:5) {
   testSetNoFactors=testSetNoFactors[,-which(names(testSetNoFactors) %in% names(colsToDropVar))]
   
   
-  library(caret)
-  trainingSetNoFactors$Response=as.factor(trainingSetNoFactors$Response)
-  preProc=preProcess(trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))],method="pca", thresh=0.1)
-  trainPC=predict(preProc,trainingSetNoFactors[,-c(ncol(trainingSetNoFactors))])
-  modelFitRPartsPCA<-train(trainingSetNoFactors$Response~.,method="rf",data=trainPC)
+  
+  preProc=createModels(trainingSetNoFactors,trainingSetNoFactors$Response)
+  compareModels(testSetNoFactors,testSetNoFactors$Response,preProc)
   
   #print(modelFitRPartsPCA$finalModel)
   
-  testSetNoFactors$Response=as.factor(testSetNoFactors$Response)
-  testPC=predict(preProc,testSetNoFactors[,-c(ncol(testSetNoFactors))]) #Apply the same preprocessing to testset.
-  cf<-confusionMatrix(testSetNoFactors$Response, predict(modelFitRPartsPCA, testPC))
-  cf
+  
 }
